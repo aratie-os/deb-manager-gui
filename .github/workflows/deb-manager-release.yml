@@ -8,6 +8,8 @@ on:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write 
 
     steps:
       - name: Checkout repository
@@ -23,29 +25,35 @@ jobs:
       - name: Read and bump version
         id: version
         run: |
+          
+          if [ ! -f version.txt ]; then echo "1.0.0" > version.txt; fi
+          
           version=$(cat version.txt)
           echo "Versão atual: $version"
 
           IFS='.' read -r major minor patch <<< "$version"
           patch=$((patch + 1))
           new_version="$major.$minor.$patch"
+          
           echo $new_version > version.txt
           echo "NEW_VERSION=$new_version" >> $GITHUB_ENV
-
+          
           git add version.txt
           git commit -m "ci: bump version to $new_version"
           git push
 
       - name: Build .deb package
         run: |
-          chmod +x deb-manager-gui
-
+          
           mkdir -p deb-manager-pkg/DEBIAN
           mkdir -p deb-manager-pkg/usr/bin
 
+          
+          chmod +x deb-manager-gui
           cp deb-manager-gui deb-manager-pkg/usr/bin/
           chmod 755 deb-manager-pkg/usr/bin/deb-manager-gui
 
+          
           cat <<EOF > deb-manager-pkg/DEBIAN/control
           Package: deb-manager-gui
           Version: ${{ env.NEW_VERSION }}
@@ -57,18 +65,14 @@ jobs:
           Description: Interface gráfica em PyQt6 para instalar/remover pacotes via APT
           EOF
 
+          
           dpkg-deb --build deb-manager-pkg
-          mv deb-manager-pkg.deb deb-manager-gui_${{ env.NEW_VERSION }}.deb
+          mv deb-manager-pkg.deb deb-manager-gui.deb
 
-      - name: Create Tag
+      - name: Release with UploadTool (Continuous)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git tag -a "v${{ env.NEW_VERSION }}" -m "Versão v${{ env.NEW_VERSION }}"
-          git push origin "v${{ env.NEW_VERSION }}"
-
-      - name: Release on GitHub
-        uses: ncipollo/release-action@v1
-        with:
-          tag: v${{ env.NEW_VERSION }}
-          name: Deb Manager GUI v${{ env.NEW_VERSION }}
-          artifacts: deb-manager-gui_${{ env.NEW_VERSION }}.deb
-          token: ${{ secrets.GITHUB_TOKEN }}
+          
+          wget -c https://github.com/probonopd/uploadtool/raw/master/upload.sh
+          bash upload.sh ./deb-manager-gui.deb
